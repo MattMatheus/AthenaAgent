@@ -1,6 +1,6 @@
 import pytest
 
-from nanobot.utils.helpers import strip_think
+from athena_agent.utils.helpers import strip_think
 
 
 class TestStripThinkTag:

@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from athena_agent.cron.service import CronService
+from athena_agent.cron.types import CronJob, CronPayload, CronSchedule, CronSupervisorSpec
 
 
 def test_add_job_rejects_unknown_timezone(tmp_path) -> None:
@@ -73,6 +73,27 @@ async def test_run_history_records_errors(tmp_path) -> None:
     assert len(loaded.state.run_history) == 1
     assert loaded.state.run_history[0].status == "error"
     assert loaded.state.run_history[0].error == "boom"
+
+
+@pytest.mark.asyncio
+async def test_run_history_records_skipped_status(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+
+    async def skip(_):
+        return "skipped"
+
+    service = CronService(store_path, on_job=skip)
+    job = service.add_job(
+        name="skip",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    await service.run_job(job.id)
+
+    loaded = service.get_job(job.id)
+    assert len(loaded.state.run_history) == 1
+    assert loaded.state.run_history[0].status == "skipped"
+    assert loaded.state.run_history[0].error is None
 
 
 @pytest.mark.asyncio
@@ -192,6 +213,37 @@ def test_remove_job_refuses_system_jobs(tmp_path) -> None:
 
     assert result == "protected"
     assert service.get_job("dream") is not None
+
+
+def test_add_supervisor_job_persists_supervisor_payload(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    job = service.add_supervisor_job(
+        name="repo walk",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        supervisor=CronSupervisorSpec(
+            source_kind="file",
+            source_ref="notes.md",
+            decision_mode="llm_gate",
+            decision_prompt="Should this run?",
+            execution_prompt="Explore the repo and summarize findings.",
+            notify_policy="evaluate",
+            session_key="supervisor:repo-walk",
+            keep_recent_messages=6,
+        ),
+        message="Supervisor repo walk",
+    )
+
+    assert job.payload.kind == "supervisor_turn"
+    assert job.payload.supervisor is not None
+    assert job.payload.supervisor.source_ref == "notes.md"
+
+    fresh = CronService(tmp_path / "cron" / "jobs.json")
+    loaded = fresh.get_job(job.id)
+    assert loaded is not None
+    assert loaded.payload.kind == "supervisor_turn"
+    assert loaded.payload.supervisor is not None
+    assert loaded.payload.supervisor.decision_mode == "llm_gate"
 
 
 @pytest.mark.asyncio

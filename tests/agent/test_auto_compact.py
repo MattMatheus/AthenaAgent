@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults
-from nanobot.command import CommandContext
-from nanobot.providers.base import LLMResponse
+from athena_agent.agent.loop import AgentLoop
+from athena_agent.bus.events import InboundMessage
+from athena_agent.bus.queue import MessageBus
+from athena_agent.config.schema import AgentDefaults
+from athena_agent.command import CommandContext
+from athena_agent.providers.base import LLMResponse
 
 
 def _make_loop(tmp_path: Path, session_ttl_minutes: int = 15) -> AgentLoop:

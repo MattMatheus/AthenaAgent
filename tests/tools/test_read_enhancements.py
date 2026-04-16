@@ -2,8 +2,8 @@
 
 import pytest
 
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
-from nanobot.agent.tools import file_state
+from athena_agent.agent.tools.filesystem import ReadFileTool, WriteFileTool
+from athena_agent.agent.tools import file_state
 
 
 @pytest.fixture(autouse=True)

@@ -4,10 +4,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from nanobot.agent.tools.cron import CronTool
-from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
-from tests.test_openai_api import pytest_plugins
+from athena_agent.agent.tools.cron import CronTool
+from athena_agent.cron.service import CronService
+from athena_agent.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:

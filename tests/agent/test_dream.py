@@ -4,9 +4,9 @@ import pytest
 
 from unittest.mock import AsyncMock, MagicMock
 
-from nanobot.agent.memory import Dream, MemoryStore
-from nanobot.agent.runner import AgentRunResult
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+from athena_agent.agent.memory import Dream, MemoryStore
+from athena_agent.agent.runner import AgentRunResult
+from athena_agent.agent.skills import BUILTIN_SKILLS_DIR
 
 
 @pytest.fixture

@@ -12,105 +12,19 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel, Field
 
-from nanobot.cli import onboard as onboard_wizard
+from athena_agent.cli import onboard as onboard_wizard
 
-# Import functions to test
-from nanobot.cli.commands import _merge_missing_defaults
-from nanobot.cli.onboard import (
+from athena_agent.cli.onboard import (
     _BACK_PRESSED,
+    _configure_obsidian_mcp,
     _configure_pydantic_model,
     _format_value,
     _get_field_display_name,
     _get_field_type_info,
     run_onboard,
 )
-from nanobot.config.schema import Config
-from nanobot.utils.helpers import sync_workspace_templates
-
-
-class TestMergeMissingDefaults:
-    """Tests for _merge_missing_defaults recursive config merging."""
-
-    def test_adds_missing_top_level_keys(self):
-        existing = {"a": 1}
-        defaults = {"a": 1, "b": 2, "c": 3}
-
-        result = _merge_missing_defaults(existing, defaults)
-
-        assert result == {"a": 1, "b": 2, "c": 3}
-
-    def test_preserves_existing_values(self):
-        existing = {"a": "custom_value"}
-        defaults = {"a": "default_value"}
-
-        result = _merge_missing_defaults(existing, defaults)
-
-        assert result == {"a": "custom_value"}
-
-    def test_merges_nested_dicts_recursively(self):
-        existing = {
-            "level1": {
-                "level2": {
-                    "existing": "kept",
-                }
-            }
-        }
-        defaults = {
-            "level1": {
-                "level2": {
-                    "existing": "replaced",
-                    "added": "new",
-                },
-                "level2b": "also_new",
-            }
-        }
-
-        result = _merge_missing_defaults(existing, defaults)
-
-        assert result == {
-            "level1": {
-                "level2": {
-                    "existing": "kept",
-                    "added": "new",
-                },
-                "level2b": "also_new",
-            }
-        }
-
-    def test_returns_existing_if_not_dict(self):
-        assert _merge_missing_defaults("string", {"a": 1}) == "string"
-        assert _merge_missing_defaults([1, 2, 3], {"a": 1}) == [1, 2, 3]
-        assert _merge_missing_defaults(None, {"a": 1}) is None
-        assert _merge_missing_defaults(42, {"a": 1}) == 42
-
-    def test_returns_existing_if_defaults_not_dict(self):
-        assert _merge_missing_defaults({"a": 1}, "string") == {"a": 1}
-        assert _merge_missing_defaults({"a": 1}, None) == {"a": 1}
-
-    def test_handles_empty_dicts(self):
-        assert _merge_missing_defaults({}, {"a": 1}) == {"a": 1}
-        assert _merge_missing_defaults({"a": 1}, {}) == {"a": 1}
-        assert _merge_missing_defaults({}, {}) == {}
-
-    def test_backfills_channel_config(self):
-        """Real-world scenario: backfill missing channel fields."""
-        existing_channel = {
-            "enabled": False,
-            "appId": "",
-            "secret": "",
-        }
-        default_channel = {
-            "enabled": False,
-            "appId": "",
-            "secret": "",
-            "msgFormat": "plain",
-            "allowFrom": [],
-        }
-
-        result = _merge_missing_defaults(existing_channel, default_channel)
-
-        assert result["msgFormat"] == "plain"
-        assert result["allowFrom"] == []
+from athena_agent.config.schema import Config
+from athena_agent.utils.helpers import sync_workspace_templates
 
 
 class TestGetFieldTypeInfo:
@@ -314,7 +228,8 @@ class TestSyncWorkspaceTemplates:
 
         # Check that some files were created
         assert isinstance(added, list)
-        # The actual files depend on the templates directory
+        assert "SUPERVISOR.md" in added
+        assert (workspace / "SUPERVISOR.md").exists()
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
         """Should not overwrite files that already exist."""
@@ -352,7 +267,7 @@ class TestProviderChannelInfo:
     """Tests for provider and channel info retrieval."""
 
     def test_get_provider_names_returns_dict(self):
-        from nanobot.cli.onboard import _get_provider_names
+        from athena_agent.cli.onboard import _get_provider_names
 
         names = _get_provider_names()
         assert isinstance(names, dict)
@@ -362,16 +277,8 @@ class TestProviderChannelInfo:
         assert "openai_codex" not in names
         assert "github_copilot" not in names
 
-    def test_get_channel_names_returns_dict(self):
-        from nanobot.cli.onboard import _get_channel_names
-
-        names = _get_channel_names()
-        assert isinstance(names, dict)
-        # Should include at least some channels
-        assert len(names) >= 0
-
     def test_get_provider_info_returns_valid_structure(self):
-        from nanobot.cli.onboard import _get_provider_info
+        from athena_agent.cli.onboard import _get_provider_info
 
         info = _get_provider_info()
         assert isinstance(info, dict)
@@ -493,3 +400,112 @@ class TestRunOnboardExitBehavior:
 
         assert result.should_save is False
         assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
+
+    def test_scheduler_section_updates_supervisor_defaults(self, monkeypatch):
+        initial_config = Config()
+
+        responses = iter(
+            [
+                "[S] Scheduler",
+                "[W] Save and Exit",
+            ]
+        )
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_configure_general_settings(config, section):
+            if section == "Scheduler":
+                config.scheduler.supervisor.interval_minutes = 45
+                config.scheduler.supervisor.keep_recent_messages = 3
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is True
+        assert result.config.scheduler.supervisor.interval_minutes == 45
+        assert result.config.scheduler.supervisor.keep_recent_messages == 3
+
+    def test_obsidian_mcp_menu_entry_updates_config(self, monkeypatch, tmp_path):
+        initial_config = Config()
+
+        responses = iter(
+            [
+                "[O] Obsidian MCP",
+                "[W] Save and Exit",
+            ]
+        )
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_configure_obsidian(config):
+            from athena_agent.config.schema import MCPServerConfig
+
+            config.tools.mcp_servers["obsidian"] = MCPServerConfig.model_validate(
+                {
+                    "type": "stdio",
+                    "command": "/usr/local/bin/obsidianMCP",
+                    "args": ["mcp"],
+                    "env": {"OBSIDIAN_VAULT": "SharedKnowledge"},
+                }
+            )
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_obsidian_mcp", fake_configure_obsidian)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is True
+        assert "obsidian" in result.config.tools.mcp_servers
+        assert result.config.tools.mcp_servers["obsidian"].command == "/usr/local/bin/obsidianMCP"
+
+
+class TestConfigureObsidianMcp:
+    def test_configures_binary_server(self, monkeypatch, tmp_path):
+        config = Config()
+
+        select_answers = iter(["Built binary"])
+        text_answers = iter(
+            [
+                "SharedKnowledge",
+                str(tmp_path / "obsidianmcp.json"),
+                "http://127.0.0.1:27124",
+                "1m0s",
+                "/usr/local/bin/obsidianMCP",
+                "mcp",
+            ]
+        )
+
+        monkeypatch.setattr(onboard_wizard, "_show_section_header", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(onboard_wizard, "console", SimpleNamespace(clear=lambda: None, print=lambda *_args, **_kwargs: None))
+        monkeypatch.setattr(onboard_wizard, "_questionary_select_value", lambda *_args, **_kwargs: next(select_answers))
+        monkeypatch.setattr(onboard_wizard, "_questionary_text_value", lambda *_args, **_kwargs: next(text_answers))
+
+        _configure_obsidian_mcp(config)
+
+        server = config.tools.mcp_servers["obsidian"]
+        assert server.command == "/usr/local/bin/obsidianMCP"
+        assert server.args == ["mcp"]
+        assert server.env["OBSIDIAN_VAULT"] == "SharedKnowledge"
+        assert server.env["OBSIDIAN_CONFIG"] == str(tmp_path / "obsidianmcp.json")

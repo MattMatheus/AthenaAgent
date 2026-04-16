@@ -2,8 +2,8 @@ import json
 import socket
 from unittest.mock import patch
 
-from nanobot.config.loader import load_config, save_config
-from nanobot.security.network import validate_url_target
+from athena_agent.config.loader import load_config, save_config
+from athena_agent.security.network import validate_url_target
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -64,6 +64,26 @@ def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path
     assert "memoryWindow" not in defaults
 
 
+def test_save_config_omits_deprecated_api_and_gateway_sections(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "api": {"host": "127.0.0.2", "port": 9999},
+                "scheduler": {"supervisor": {"keepRecentMessages": 4}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    save_config(config, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert "api" not in saved
+    assert saved["scheduler"]["supervisor"]["keepRecentMessages"] == 4
+
+
 def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
@@ -81,20 +101,20 @@ def test_onboard_does_not_crash_with_legacy_memory_window(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
-    monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
+    monkeypatch.setattr("athena_agent.config.loader.get_config_path", lambda: config_path)
+    monkeypatch.setattr("athena_agent.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
 
     from typer.testing import CliRunner
-    from nanobot.cli.commands import app
+    from athena_agent.cli.commands import app
     runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
 
 
-def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch) -> None:
-    from types import SimpleNamespace
-
+def test_onboard_refresh_preserves_legacy_channel_config_without_plugin_backfill(
+    tmp_path, monkeypatch
+) -> None:
     config_path = tmp_path / "config.json"
     workspace = tmp_path / "workspace"
     config_path.write_text(
@@ -113,31 +133,39 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("nanobot.config.loader.get_config_path", lambda: config_path)
-    monkeypatch.setattr("nanobot.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
-    monkeypatch.setattr(
-        "nanobot.channels.registry.discover_all",
-        lambda: {
-            "qq": SimpleNamespace(
-                default_config=lambda: {
-                    "enabled": False,
-                    "appId": "",
-                    "secret": "",
-                    "allowFrom": [],
-                    "msgFormat": "plain",
-                }
-            )
-        },
-    )
+    monkeypatch.setattr("athena_agent.config.loader.get_config_path", lambda: config_path)
+    monkeypatch.setattr("athena_agent.cli.commands.get_workspace_path", lambda _workspace=None: workspace)
 
     from typer.testing import CliRunner
-    from nanobot.cli.commands import app
+    from athena_agent.cli.commands import app
     runner = CliRunner()
     result = runner.invoke(app, ["onboard"], input="n\n")
 
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))
-    assert saved["channels"]["qq"]["msgFormat"] == "plain"
+    assert "channels" not in saved
+    assert saved["output"]["qq"]["allowFrom"] == []
+
+
+def test_load_config_promotes_legacy_channels_into_output(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "channels": {
+                    "sendProgress": False,
+                    "qq": {"allowFrom": ["alice"]},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.output.send_progress is False
+    assert config.channels.send_progress is False
+    assert getattr(config.output, "qq")["allowFrom"] == ["alice"]
 
 
 def test_load_config_resets_ssrf_whitelist_when_next_config_is_empty(tmp_path) -> None:
@@ -150,11 +178,11 @@ def test_load_config_resets_ssrf_whitelist_when_next_config_is_empty(tmp_path) -
     defaulted.write_text(json.dumps({}), encoding="utf-8")
 
     load_config(whitelisted)
-    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+    with patch("athena_agent.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
         ok, err = validate_url_target("http://ts.local/api")
         assert ok, err
 
     load_config(defaulted)
-    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+    with patch("athena_agent.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
         ok, _ = validate_url_target("http://ts.local/api")
         assert not ok
