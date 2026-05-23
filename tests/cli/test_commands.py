@@ -201,6 +201,49 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
+def test_status_reports_oauth_not_logged_in(mock_paths, monkeypatch):
+    config_file, _, _ = mock_paths
+    config_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "athena_agent.cli.commands._get_oauth_provider_status",
+        lambda provider_name: None,
+    )
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "OpenAI Codex: not logged in" in _strip_ansi(result.stdout)
+    assert "Github Copilot: not logged in" in _strip_ansi(result.stdout)
+
+
+def test_status_reports_oauth_logged_in(mock_paths, monkeypatch):
+    config_file, _, _ = mock_paths
+    config_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "athena_agent.cli.commands._get_oauth_provider_status",
+        lambda provider_name: object() if provider_name == "openai_codex" else None,
+    )
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "OpenAI Codex: ✓ (OAuth)" in _strip_ansi(result.stdout)
+
+
+def test_agent_missing_key_mentions_codex_model_when_oauth_available(mock_paths, monkeypatch):
+    monkeypatch.setattr(
+        "athena_agent.cli.commands._get_oauth_provider_status",
+        lambda provider_name: object() if provider_name == "openai_codex" else None,
+    )
+
+    result = runner.invoke(app, ["agent"])
+
+    assert result.exit_code == 1
+    output = _strip_ansi(result.stdout)
+    assert "The current default model is anthropic/claude-opus-4-5." in output
+    assert "openai-codex/gpt-5.1-codex" in output
+
+
 def test_config_dump_excludes_oauth_provider_blocks():
     config = Config()
 

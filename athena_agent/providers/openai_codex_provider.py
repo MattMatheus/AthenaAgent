@@ -23,6 +23,17 @@ DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "athena_agent"
 
 
+def get_openai_codex_login_status() -> Any | None:
+    """Return the persisted Codex OAuth token when available."""
+    try:
+        token = get_codex_token()
+    except Exception:
+        return None
+    if not token or not getattr(token, "access", None):
+        return None
+    return token
+
+
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 

@@ -72,6 +72,43 @@ _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
 
 
+def _get_oauth_provider_status(provider_name: str) -> object | None:
+    """Return the stored OAuth token for a provider when available."""
+    if provider_name == "openai_codex":
+        from athena_agent.providers.openai_codex_provider import get_openai_codex_login_status
+
+        return get_openai_codex_login_status()
+    if provider_name == "github_copilot":
+        from athena_agent.providers.github_copilot_provider import get_github_copilot_login_status
+
+        return get_github_copilot_login_status()
+    return None
+
+
+def _print_missing_provider_key_help(model: str) -> None:
+    """Explain how to proceed when the selected model needs an API key."""
+    console.print("[red]Error: No API key configured.[/red]")
+    console.print(f"The current default model is [cyan]{model}[/cyan].")
+    console.print("Set one in ~/.athena-agent/config.json under providers section")
+
+    if _get_oauth_provider_status("openai_codex"):
+        console.print(
+            "You already have OpenAI Codex OAuth login. To use your ChatGPT/Codex subscription,"
+        )
+        console.print(
+            "set [cyan]agents.defaults.model[/cyan] to something like "
+            "[cyan]openai-codex/gpt-5.1-codex[/cyan]."
+        )
+    elif _get_oauth_provider_status("github_copilot"):
+        console.print(
+            "You already have GitHub Copilot OAuth login. To use it,"
+        )
+        console.print(
+            "set [cyan]agents.defaults.model[/cyan] to something like "
+            "[cyan]github-copilot/gpt-5.3-codex[/cyan]."
+        )
+
+
 def _flush_pending_tty_input() -> None:
     """Drop unread keypresses typed while the model was generating output."""
     try:
@@ -382,8 +419,7 @@ def _make_provider(config: Config):
         needs_key = not (p and p.api_key)
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
-            console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.athena-agent/config.json under providers section")
+            _print_missing_provider_key_help(model)
             raise typer.Exit(1)
 
     # --- instantiation by backend ---
@@ -793,7 +829,11 @@ def status():
             if p is None:
                 continue
             if spec.is_oauth:
-                console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+                has_token = _get_oauth_provider_status(spec.name)
+                if has_token:
+                    console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+                else:
+                    console.print(f"{spec.label}: [dim]not logged in[/dim]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:

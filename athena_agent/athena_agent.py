@@ -170,7 +170,24 @@ def _make_provider(config: Any) -> Any:
         needs_key = not (p and p.api_key)
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
-            raise ValueError(f"No API key configured for provider '{provider_name}'.")
+            from athena_agent.providers.github_copilot_provider import get_github_copilot_login_status
+            from athena_agent.providers.openai_codex_provider import get_openai_codex_login_status
+
+            message = (
+                f"No API key configured for provider '{provider_name}'. "
+                f"The current default model is '{model}'."
+            )
+            if get_openai_codex_login_status():
+                message += (
+                    " OpenAI Codex OAuth is available; set agents.defaults.model to "
+                    "'openai-codex/gpt-5.1-codex' to use your ChatGPT/Codex subscription."
+                )
+            elif get_github_copilot_login_status():
+                message += (
+                    " GitHub Copilot OAuth is available; set agents.defaults.model to "
+                    "'github-copilot/gpt-5.3-codex' to use that login."
+                )
+            raise ValueError(message)
 
     if backend == "openai_codex":
         from athena_agent.providers.openai_codex_provider import OpenAICodexProvider
