@@ -65,37 +65,29 @@ class AthenaAgent:
                 Path(workspace).expanduser().resolve()
             )
 
-        provider = _make_provider(config)
-        bus = MessageBus()
-        defaults = config.agents.defaults
-        cron = CronService(config.workspace_path / "cron" / "jobs.json")
+        return cls.from_settings(config, workspace=None)
 
-        loop = AgentLoop(
-            bus=bus,
-            provider=provider,
-            workspace=config.workspace_path,
-            model=defaults.model,
-            max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
-            context_block_limit=defaults.context_block_limit,
-            max_tool_result_chars=defaults.max_tool_result_chars,
-            provider_retry_mode=defaults.provider_retry_mode,
-            web_config=config.tools.web,
-            exec_config=config.tools.exec,
-            cron_service=cron,
-            restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
-            timezone=defaults.timezone,
-            unified_session=defaults.unified_session,
-            disabled_skills=defaults.disabled_skills,
-            session_ttl_minutes=defaults.session_ttl_minutes,
-            tool_profile=config.tools.profiles.default_profile,
-            subagent_tool_profile=config.tools.profiles.subagent_profile,
-            custom_tool_profiles=config.tools.profiles.custom_profiles,
-        )
-        from athena_agent.cron.runtime import make_cron_runtime_callback
+    @classmethod
+    def from_settings(
+        cls,
+        config: Any,
+        *,
+        workspace: str | Path | None = None,
+    ) -> "AthenaAgent":
+        """Create an AthenaAgent instance from an in-memory config object.
 
-        cron.on_job = make_cron_runtime_callback(loop)
+        This entry point is intended for embedded runtimes that already own
+        configuration resolution, such as Console-launched task runners. It
+        does not read ``~/.athena-agent/config.json``.
+        """
+        from athena_agent.config.loader import resolve_config_env_vars
+
+        resolved_config = resolve_config_env_vars(config.model_copy(deep=True))
+        if workspace is not None:
+            resolved_config.agents.defaults.workspace = str(
+                Path(workspace).expanduser().resolve()
+            )
+        loop, cron = _build_loop(resolved_config)
         return cls(loop, cron_service=cron)
 
     async def start(self) -> None:
@@ -151,6 +143,42 @@ class AthenaAgent:
 
         content = (response.content if response else None) or ""
         return RunResult(content=content, tools_used=[], messages=[])
+
+
+def _build_loop(config: Any) -> tuple[AgentLoop, CronService]:
+    """Build the runtime loop and cron service from resolved settings."""
+    provider = _make_provider(config)
+    bus = MessageBus()
+    defaults = config.agents.defaults
+    cron = CronService(config.workspace_path / "cron" / "jobs.json")
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=defaults.model,
+        max_iterations=defaults.max_tool_iterations,
+        context_window_tokens=defaults.context_window_tokens,
+        context_block_limit=defaults.context_block_limit,
+        max_tool_result_chars=defaults.max_tool_result_chars,
+        provider_retry_mode=defaults.provider_retry_mode,
+        web_config=config.tools.web,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        mcp_servers=config.tools.mcp_servers,
+        timezone=defaults.timezone,
+        unified_session=defaults.unified_session,
+        disabled_skills=defaults.disabled_skills,
+        session_ttl_minutes=defaults.session_ttl_minutes,
+        tool_profile=config.tools.profiles.default_profile,
+        subagent_tool_profile=config.tools.profiles.subagent_profile,
+        custom_tool_profiles=config.tools.profiles.custom_profiles,
+    )
+    from athena_agent.cron.runtime import make_cron_runtime_callback
+
+    cron.on_job = make_cron_runtime_callback(loop)
+    return loop, cron
 
 def _make_provider(config: Any) -> Any:
     """Create the LLM provider from config (extracted from CLI)."""

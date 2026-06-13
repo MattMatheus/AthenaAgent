@@ -35,6 +35,62 @@ def test_from_config_creates_instance(tmp_path):
     assert bot._loop.workspace == tmp_path
 
 
+def test_from_settings_creates_instance_without_global_config(tmp_path, monkeypatch):
+    from athena_agent.config.schema import Config
+
+    empty_home = tmp_path / "empty-home"
+    empty_home.mkdir()
+    workspace = tmp_path / "workspace"
+    config = Config.model_validate(
+        {
+            "providers": {
+                "custom": {
+                    "apiKey": "sk-console-runtime-key",
+                    "apiBase": "https://provider.example/v1",
+                }
+            },
+            "agents": {
+                "defaults": {
+                    "provider": "custom",
+                    "model": "console-model",
+                    "workspace": str(tmp_path / "original-workspace"),
+                }
+            },
+        }
+    )
+
+    monkeypatch.setenv("HOME", str(empty_home))
+    with patch("athena_agent.providers.openai_compat_provider.AsyncOpenAI"):
+        bot = AthenaAgent.from_settings(config, workspace=workspace)
+
+    assert bot._loop is not None
+    assert bot._loop.workspace == workspace
+    assert config.agents.defaults.workspace == str(tmp_path / "original-workspace")
+
+
+def test_from_settings_respects_in_memory_workspace_when_not_overridden(tmp_path):
+    from athena_agent.config.schema import Config
+
+    workspace = tmp_path / "configured-workspace"
+    config = Config.model_validate(
+        {
+            "providers": {"custom": {"apiKey": "sk-test-key"}},
+            "agents": {
+                "defaults": {
+                    "provider": "custom",
+                    "model": "plain-console-model",
+                    "workspace": str(workspace),
+                }
+            },
+        }
+    )
+
+    with patch("athena_agent.providers.openai_compat_provider.AsyncOpenAI"):
+        bot = AthenaAgent.from_settings(config)
+
+    assert bot._loop.workspace == workspace
+
+
 def test_from_config_default_path():
     from athena_agent.config.schema import Config
 
