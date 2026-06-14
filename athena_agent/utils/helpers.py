@@ -1,6 +1,7 @@
 """Utility functions for AthenaAgent."""
 
 import base64
+import functools
 import json
 import re
 import shutil
@@ -12,6 +13,12 @@ from typing import Any
 
 import tiktoken
 from loguru import logger
+
+
+@functools.lru_cache(maxsize=1)
+def _get_cl100k_encoder():
+    """Return a process-wide cached cl100k_base tiktoken encoder."""
+    return tiktoken.get_encoding("cl100k_base")
 
 
 def strip_think(text: str) -> str:
@@ -295,7 +302,7 @@ def estimate_prompt_tokens(
     reasoning_content, tool_call_id, name, plus per-message framing overhead.
     """
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_cl100k_encoder()
         parts: list[str] = []
         for msg in messages:
             content = msg.get("content")
@@ -362,7 +369,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if not payload:
         return 4
     try:
-        enc = tiktoken.get_encoding("cl100k_base")
+        enc = _get_cl100k_encoder()
         return max(4, len(enc.encode(payload)) + 4)
     except Exception:
         return max(4, len(payload) // 4 + 4)

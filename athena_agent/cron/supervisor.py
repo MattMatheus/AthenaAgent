@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from athena_agent.cron.types import CronJob
 
 if TYPE_CHECKING:
     from athena_agent.providers.base import LLMProvider
+
+MCPCall = Callable[[str, dict[str, object]], Awaitable[str]]
 
 _SUPERVISOR_DECISION_TOOL = [
     {
@@ -61,6 +63,7 @@ class SupervisorExecutor:
         timezone: str | None = None,
         on_execute: Callable[[str, CronJob], Awaitable[str | None]] | None = None,
         on_notify: Callable[[str, CronJob], Awaitable[None]] | None = None,
+        mcp_call: MCPCall | None = None,
     ) -> None:
         self.workspace = workspace
         self.provider = provider
@@ -68,8 +71,18 @@ class SupervisorExecutor:
         self.timezone = timezone
         self.on_execute = on_execute
         self.on_notify = on_notify
+        self.mcp_call = mcp_call
 
-    def _load_source(self, job: CronJob) -> str:
+    @staticmethod
+    def _parse_mcp_source_ref(source_ref: str) -> tuple[str, str]:
+        server, sep, ref = source_ref.partition(":")
+        if not sep or not server.strip() or not ref.strip():
+            raise ValueError(
+                "MCP supervisor source_ref must use 'server:ref' format"
+            )
+        return server.strip(), ref.strip()
+
+    async def _load_source(self, job: CronJob) -> str:
         spec = job.payload.supervisor
         if spec is None:
             return job.payload.message
@@ -79,6 +92,13 @@ class SupervisorExecutor:
             ref = Path(spec.source_ref).expanduser()
             path = ref if ref.is_absolute() else (self.workspace / ref)
             return path.read_text(encoding="utf-8")
+        if spec.source_kind in ("mcp_note", "mcp_query"):
+            if self.mcp_call is None:
+                raise ValueError("MCP source loading is not configured")
+            server, ref = self._parse_mcp_source_ref(spec.source_ref)
+            if spec.source_kind == "mcp_note":
+                return await self.mcp_call(f"mcp_{server}_read_note", {"path": ref})
+            return await self.mcp_call(f"mcp_{server}_search_vault", {"query": ref})
         raise ValueError(f"Unsupported supervisor source_kind '{spec.source_kind}'")
 
     async def _decide(self, job: CronJob, source_content: str) -> tuple[str, str]:
@@ -143,7 +163,7 @@ class SupervisorExecutor:
             raise ValueError("SupervisorExecutor can only run supervisor_turn jobs")
 
         try:
-            source_content = self._load_source(job)
+            source_content = await self._load_source(job)
         except Exception as exc:
             return SupervisorRunResult(status="error", error=str(exc))
 

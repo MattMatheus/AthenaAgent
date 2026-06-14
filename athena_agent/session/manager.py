@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -187,21 +188,34 @@ class SessionManager:
             return None
 
     def save(self, session: Session) -> None:
-        """Save a session to disk."""
+        """Save a session to disk atomically."""
         path = self._get_session_path(session.key)
 
-        with open(path, "w", encoding="utf-8") as f:
-            metadata_line = {
-                "_type": "metadata",
-                "key": session.key,
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
-            }
-            f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-            for msg in session.messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        metadata_line = {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_consolidated": session.last_consolidated
+        }
+        lines = [json.dumps(metadata_line, ensure_ascii=False)]
+        lines.extend(json.dumps(msg, ensure_ascii=False) for msg in session.messages)
+        payload = "\n".join(lines) + "\n"
+
+        tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
         self._cache[session.key] = session
 

@@ -7,7 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
-from athena_agent.security.network import configure_ssrf_whitelist, contains_internal_url, validate_url_target
+from athena_agent.security.network import (
+    configure_ssrf_whitelist,
+    contains_internal_url,
+    validate_resolved_url,
+    validate_url_target,
+)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -76,6 +81,47 @@ def test_allows_normal_https():
     with patch("athena_agent.security.network.socket.getaddrinfo", _fake_resolve("github.com", ["140.82.121.3"])):
         ok, err = validate_url_target("https://github.com/foundry/AthenaAgent")
         assert ok
+
+
+# ---------------------------------------------------------------------------
+# validate_resolved_url — redirect target re-checks
+# ---------------------------------------------------------------------------
+
+def test_resolved_url_rejects_missing_hostname():
+    ok, err = validate_resolved_url("http:///path")
+
+    assert not ok
+    assert "hostname" in err.lower()
+
+
+def test_resolved_url_rejects_unresolvable_hostname():
+    with patch("athena_agent.security.network.socket.getaddrinfo", _fake_resolve("elsewhere.test", ["93.184.216.34"])):
+        ok, err = validate_resolved_url("https://missing.test/path")
+
+    assert not ok
+    assert "cannot resolve" in err.lower()
+
+
+def test_resolved_url_rejects_hostname_resolving_to_private_ip():
+    with patch("athena_agent.security.network.socket.getaddrinfo", _fake_resolve("metadata.test", ["169.254.169.254"])):
+        ok, err = validate_resolved_url("https://metadata.test/latest")
+
+    assert not ok
+    assert "private" in err.lower()
+
+
+def test_resolved_url_allows_hostname_resolving_to_public_ip():
+    with patch("athena_agent.security.network.socket.getaddrinfo", _fake_resolve("example.com", ["93.184.216.34"])):
+        ok, err = validate_resolved_url("https://example.com/page")
+
+    assert ok, err
+
+
+def test_resolved_url_rejects_literal_private_ip():
+    ok, err = validate_resolved_url("http://127.0.0.1/")
+
+    assert not ok
+    assert "private" in err.lower()
 
 
 # ---------------------------------------------------------------------------

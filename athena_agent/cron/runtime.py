@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from athena_agent.bus.events import OutboundMessage
 from athena_agent.cron.supervisor import SupervisorExecutor
@@ -55,6 +55,12 @@ def make_cron_runtime_callback(agent_loop: "AgentLoop"):
             )
         )
 
+    async def _call_mcp_source_tool(name: str, args: dict[str, object]) -> str:
+        tool = agent_loop.tools.get(name)
+        if tool is None:
+            raise ValueError(f"MCP tool '{name}' is not registered")
+        return await tool.execute(**args)
+
     async def _on_job(job: CronJob) -> str | dict[str, str | None] | None:
         from athena_agent.utils.evaluator import evaluate_response
 
@@ -69,6 +75,7 @@ def make_cron_runtime_callback(agent_loop: "AgentLoop"):
                 timezone=agent_loop.context.timezone,
                 on_execute=_run_task,
                 on_notify=_notify,
+                mcp_call=_call_mcp_source_tool,
             )
             result = await executor.run_job(job)
             return {"status": result.status, "error": result.error}

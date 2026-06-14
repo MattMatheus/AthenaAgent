@@ -20,7 +20,6 @@ if sys.platform == "win32":
             pass
 
 import typer
-from loguru import logger
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML

@@ -134,4 +134,4 @@ async def test_supervisor_executor_errors_on_unsupported_source_kind(tmp_path: P
     result = await executor.run_job(_make_job(source_kind="mcp_note", source_ref="vault://note"))
 
     assert result.status == "error"
-    assert "Unsupported supervisor source_kind" in (result.error or "")
+    assert "MCP source loading is not configured" in (result.error or "")
