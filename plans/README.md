@@ -16,14 +16,33 @@ dev deps exists — use `.venv/bin/python` / `.venv/bin/ruff`, or
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Green the CI lint gate (remove 3 unused imports) | P1 | S | — | DONE |
-| 002 | Write config file with owner-only perms (0600) | P1 | S | — | DONE |
-| 003 | Make session writes atomic (temp + os.replace) | P1 | S-M | — | DONE |
-| 004 | Cache the tiktoken encoder | P2 | S | — | DONE |
-| 005 | Make redirect/SSRF validation fail-closed | P2 | S | — | DONE |
-| 006 | Spike: supervisor MCP source loaders (`mcp_note`/`mcp_query`) | P2 | M | — | DONE |
+| 001 | Green the CI lint gate (remove 3 unused imports) | P1 | S | — | DONE ✓ verified 2026-06-15 |
+| 002 | Write config file with owner-only perms (0600) | P1 | S | — | DONE ✓ verified 2026-06-15 |
+| 003 | Make session writes atomic (temp + os.replace) | P1 | S-M | — | DONE ✓ verified 2026-06-15 |
+| 004 | Cache the tiktoken encoder | P2 | S | — | DONE ✓ verified 2026-06-15 |
+| 005 | Make redirect/SSRF validation fail-closed | P2 | S | — | DONE ✓ verified 2026-06-15 |
+| 006 | Spike: supervisor MCP source loaders (`mcp_note`/`mcp_query`) | P2 | M | — | DONE ✓ verified 2026-06-15 |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
+
+## Reconcile log — 2026-06-15 (HEAD `37bd8c72`)
+
+All six plans were committed in `37bd8c72` ("improve pass"). Reconcile re-verified
+the done criteria on current HEAD — all hold:
+
+- **Lint gate** `ruff check athena_agent --select F401,F841` → `All checks passed!` (covers 001).
+- **Tests** `python -m pytest tests/ -q` → **1262 passed** (planning baseline was 1244; the +18 are the new tests added by 002–006).
+- **002** — `config/loader.py:75,85` set dir `0o700` / file `0o600`. ✓
+- **003** — `session/manager.py:212` uses `os.replace`; the truncating `open(path,"w")` in `save()` is gone. ✓
+- **004** — exactly one `tiktoken.get_encoding` in `utils/helpers.py`, wrapped in `@functools.lru_cache(maxsize=1)`. ✓
+- **005** — within `validate_resolved_url` (`security/network.py:81-110`) the only `True` return is the final all-public-IP allow (line 110); the early fail-open returns are gone. (A bare file-wide `grep "return True"` also matches `validate_url_target:78` and `contains_internal_url:119` — both correct sibling functions, not regressions.) ✓
+- **006** — `_load_source` is async, `run_job` awaits it, the `mcp_note`/`mcp_query` branches are implemented (`cron/supervisor.py:85,95,99,166`), and the test file `tests/cron/test_supervisor_mcp_source.py` exists. ✓
+
+**Note on the two `006-*` files (not a numbering collision):**
+`006-supervisor-mcp-source-loaders-spike.md` is the *plan*;
+`006-design-mcp-source-loaders.md` is **Deliverable 1 of that plan** — the design
+doc the spike instructed the executor to create at exactly that path. Both are
+intentional; the design doc is plan output, not a second plan.
 
 ## Recommended order & dependency notes
 
